@@ -8,12 +8,14 @@ set(VDBLIB_HEADERS
     vdb/injector.h
     vdb/io.h
     vdb/particle_system.h
+    vdb/openvdb_utils.h
     vdb/velocity_grid.h
 )
 set(VDBLIB_SOURCES 
     vdb/injector.cpp
     vdb/io.cpp
     vdb/particle_system.cpp
+    vdb/openvdb_utils.cpp
     vdb/velocity_grid.cpp
 )
 add_library(vdblib STATIC ${VDBLIB_SOURCES} ${VDBLIB_HEADERS})

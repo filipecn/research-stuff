@@ -1,6 +1,6 @@
 set(SOURCES 
     main.cpp
-    openvdb_tests.cpp
+    openvdb_utils_tests.cpp
     vdb_io_tests.cpp
     vdb_particle_system_tests.cpp
     vdb_velocity_grid_tests.cpp
