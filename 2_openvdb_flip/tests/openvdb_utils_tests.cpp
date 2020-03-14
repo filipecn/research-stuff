@@ -1,6 +1,7 @@
 #include <catch2/catch.hpp>
 
 #include <openvdb/openvdb.h>
+#include <openvdb/points/PointAttribute.h>
 #include <openvdb/tools/LevelSetSphere.h>
 #include <vdb/openvdb_utils.h>
 
@@ -78,6 +79,48 @@ TEST_CASE("OpenVDB Sanity checks", "[openvdb]") {
       }
     }
   }
+  SECTION("Attributes descriptor") {
+    // create a point tree with multiple attribute types
+    // configure position attribute
+    points::AttributeSet::DescriptorPtr descriptor(
+        points::AttributeSet::Descriptor::create(
+            points::TypedAttributeArray<Vec3f,
+                                        points::NullCodec>::attributeType()));
+    // create tree
+    points::PointDataTree point_tree;
+    // get leaf
+    points::PointDataTree::LeafNodeType *leaf =
+        point_tree.touchLeaf(Coord(0, 0, 0));
+    // init leaf
+    Index voxels_per_leaf = points::PointDataGrid::TreeType::LeafNodeType::SIZE;
+    leaf->initializeAttributes(descriptor, voxels_per_leaf);
+    // add Vec3d type attribute representing velocity
+    points::appendAttribute<Vec3d>(point_tree, "V");
+    // add float type attribute representing radius
+    points::appendAttribute<float>(point_tree, "R");
+    // check attributes
+    REQUIRE(leaf->attributeSet().descriptor().find("P") == 0);
+    REQUIRE(leaf->attributeSet().descriptor().find("V") == 1);
+    REQUIRE(leaf->attributeSet().descriptor().find("R") == 2);
+    REQUIRE(leaf->attributeSet().get(0)->valueTypeIsVector());
+    REQUIRE(leaf->attributeSet().get(1)->valueTypeIsVector());
+    REQUIRE(leaf->attributeSet().get(2)->valueTypeIsFloatingPoint());
+    // set leaf offsets
+    for (Index index = 0; index < voxels_per_leaf; ++index)
+      leaf->setOffsetOn(index, index + 1);
+    leaf->validateOffsets();
+    { // set values
+      points::AttributeWriteHandle<Vec3f> p_handle(leaf->attributeArray("P"));
+      points::AttributeWriteHandle<Vec3d> v_handle(leaf->attributeArray("V"));
+      points::AttributeWriteHandle<float> r_handle(leaf->attributeArray("R"));
+      for (auto index = leaf->beginIndexOn(); index; ++index) {
+        p_handle.set(*index, Vec3f(0, 0.001 * *index, 0.2));
+        v_handle.set(*index, Vec3d(0.001 * *index, 0, 0.2));
+        r_handle.set(*index, *index);
+      }
+    }
+    vdb::printLeafPoints(leaf);
+  }
 }
 
 TEST_CASE("Combine", "[utils]") {
@@ -121,9 +164,9 @@ TEST_CASE("Combine", "[utils]") {
         handle.set(*index_iter, Vec3f(0.2, 0.2, 0.2));
       REQUIRE(512 == points::pointCount(*point_tree2));
     }
-    vdb::combine(point_tree1.get(), point_tree2.get());
-    auto tree1_leaf = point_tree1->touchLeaf(Coord(0, 0, 0));
-    vdb::printLeafPoints(tree1_leaf);
+    vdb::combine(point_tree1, point_tree2);
+    // auto tree1_leaf = point_tree1->touchLeaf(Coord(0, 0, 0));
+    // vdb::printLeafPoints(tree1_leaf);
     REQUIRE(1024 == points::pointCount(*point_tree1));
   }
   SECTION("alternating voxels") {
@@ -172,8 +215,8 @@ TEST_CASE("Combine", "[utils]") {
       for (auto index_iter = leaf->beginIndexOn(); index_iter; ++index_iter)
         handle.set(*index_iter, Vec3f(-0.1 * (*index_iter % 2 + 1), 0, 0));
     }
-    vdb::combine(point_tree1.get(), point_tree2.get());
-    auto tree1_leaf = point_tree1->touchLeaf(Coord(0, 0, 0));
-    vdb::printLeafPoints(tree1_leaf);
+    vdb::combine(point_tree1, point_tree2);
+    // auto tree1_leaf = point_tree1->touchLeaf(Coord(0, 0, 0));
+    // vdb::printLeafPoints(tree1_leaf);
   }
 }

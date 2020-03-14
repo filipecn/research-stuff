@@ -40,10 +40,10 @@ void printLeafPoints(const openvdb::points::PointDataTree::LeafNodeType *leaf);
 
 /// \brief
 ///
-/// \param tree_a **[in/out]**
+/// \param tree_a **[in]**
 /// \param tree_b **[in]**
-void combine(openvdb::points::PointDataTree *tree_a,
-             const openvdb::points::PointDataTree *tree_b);
+void combine(openvdb::points::PointDataTree::Ptr &tree_a,
+             const openvdb::points::PointDataTree::Ptr &tree_b);
 
 } // namespace vdb
 
