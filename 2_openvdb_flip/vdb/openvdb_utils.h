@@ -33,6 +33,55 @@
 
 namespace vdb {
 
+struct AttributesDescriptor {
+  /// \brief Construct a new Attributes Descriptor object
+  ///
+  /// \param d **[in]**
+  AttributesDescriptor(
+      openvdb::points::AttributeSet::DescriptorPtr d =
+          openvdb::points::AttributeSet::Descriptor::create(
+              openvdb::points::TypedAttributeArray<
+                  openvdb::Vec3f,
+                  openvdb::points::NullCodec>::attributeType()));
+  /// \brief
+  ///
+  /// \tparam T
+  /// \param names **[in]**
+  template <typename T> void add(const std::vector<std::string> &names) {
+    if (std::is_same<T, float>::value)
+      for (auto name : names)
+        float_attributes_.insert(name);
+    else if (std::is_same<T, openvdb::Vec3f>::value)
+      for (auto name : names)
+        vec3f_attributes_.insert(name);
+    else if (std::is_same<T, openvdb::Vec3d>::value)
+      for (auto name : names)
+        vec3d_attributes_.insert(name);
+    else
+      std::cerr << "attribute type not supported!\n";
+  }
+  /// \brief
+  ///
+  /// \tparam T
+  /// \return size_t
+  template <typename T> size_t size() const {
+    if (std::is_same<T, float>::value)
+      return float_attributes_.size();
+    if (std::is_same<T, openvdb::Vec3f>::value)
+      return vec3f_attributes_.size();
+    if (std::is_same<T, openvdb::Vec3d>::value)
+      return vec3d_attributes_.size();
+    return 0;
+  }
+  /// \param tree **[in/out]**
+  void appendTo(openvdb::points::PointDataTree::Ptr &tree) const;
+
+  openvdb::points::AttributeSet::DescriptorPtr descriptor;
+
+private:
+  std::set<std::string> float_attributes_, vec3f_attributes_, vec3d_attributes_;
+};
+
 /// \brief
 ///
 /// \param leaf **[in]**
@@ -42,8 +91,10 @@ void printLeafPoints(const openvdb::points::PointDataTree::LeafNodeType *leaf);
 ///
 /// \param tree_a **[in]**
 /// \param tree_b **[in]**
+/// \param attributes_descriptor **[in]**
 void combine(openvdb::points::PointDataTree::Ptr &tree_a,
-             const openvdb::points::PointDataTree::Ptr &tree_b);
+             const openvdb::points::PointDataTree::Ptr &tree_b,
+             AttributesDescriptor &attributes_descriptor);
 
 } // namespace vdb
 
