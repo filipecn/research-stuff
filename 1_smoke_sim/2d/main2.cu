@@ -14,11 +14,12 @@ int main(int argc, char **argv) {
   // sim
   ponos::size2 res(resSize, resSize);
   SmokeSolver2 solver;
-  solver.setSpacing(ponos::vec2f(1.f / res.width, 1.f / res.height));
+  solver.setSpacing(ponos::vec2f(0.01f));
   solver.setResolution(res);
   solver.init();
   solver.rasterColliders();
-  SphereSmokeInjector2 injector(point2(0, 0), 0.5);
+  SphereSmokeInjector2 injector(point2(resSize / 2) * 0.01f,
+                                resSize * 0.3 * 0.01f);
   injector.inject(solver.scalarField(0), 0.1);
   // app
   circe::SceneApp<> app(WIDTH, HEIGHT, "Example", false);
@@ -43,7 +44,7 @@ int main(int argc, char **argv) {
       if (key == GLFW_KEY_Q)
         app.exit();
       if (key == GLFW_KEY_SPACE) {
-        // solver.step(0.01);
+        solver.step(0.01);
         // std::cerr << solver.scalarField(0).data() << std::endl;
       }
     }

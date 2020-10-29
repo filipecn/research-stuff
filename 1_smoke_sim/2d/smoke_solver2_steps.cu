@@ -27,6 +27,7 @@
 
 #include "blas/pcg2.h"
 #include "smoke_solver2_steps.h"
+#include <defs.h>
 
 using namespace hermes::cuda;
 /*
@@ -36,12 +37,12 @@ texture<unsigned char, cudaTextureType2D> solidTex2;
 
 __global__ void __applyForceField(Grid2Accessor<f32> velocity,
                                   Array2Accessor<u8> solid,
-                                  Grid2Accessor<f32> force, f32 dt, vec2u d) {
+                                  Grid2Accessor<f32> force, f32 dt, index2 d) {
   index2 index(blockIdx.x * blockDim.x + threadIdx.x,
                blockIdx.y * blockDim.y + threadIdx.y);
-  if (velocity.stores(index) && !solid[index] && !solid[index.plus(-d.x, -d.y)])
+  if (velocity.stores(index) && !solid[index] && !solid[index.plus(-d.i, -d.j)])
     velocity[index] +=
-        dt * (force[index.plus(-d.x, -d.y)] + force[index]) * 0.5f;
+        dt * (force[index.plus(-d.i, -d.j)] + force[index]) * 0.5f;
 }
 
 void applyForceField(VectorGrid2<f32> &velocity, Array2<u8> &solid,
@@ -50,13 +51,13 @@ void applyForceField(VectorGrid2<f32> &velocity, Array2<u8> &solid,
     ThreadArrayDistributionInfo td(velocity.u().resolution());
     __applyForceField<<<td.gridSize, td.blockSize>>>(
         velocity.u().accessor(), solid.accessor(), force_field.u().accessor(),
-        dt, vec2u(1, 0));
+        dt, index2(1, 0));
   }
   {
     ThreadArrayDistributionInfo td(velocity.v().resolution());
     __applyForceField<<<td.gridSize, td.blockSize>>>(
         velocity.v().accessor(), solid.accessor(), force_field.v().accessor(),
-        dt, vec2u(0, 1));
+        dt, index2(0, 1));
   }
 }
 
@@ -118,195 +119,149 @@ void computeDivergence(VectorGrid2<f32> &velocity, Array2<u8> &solid,
       velocity.accessor(), solid.accessor(), solidVelocity.accessor(),
       divergence.accessor(), inv);
 }
-/*
-__global__ void __fillPressureMatrix(MemoryBlock2Accessor<FDMatrix2Entry> A,
-                                     RegularGrid2Accessor<unsigned char> solid,
-                                     float scale) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  int j = blockIdx.y * blockDim.y + threadIdx.y;
-  if (A.isIndexValid(i, j)) {
-    if (solid(i, j))
+
+__global__ void __fillPressureMatrix(FDMatrix2Accessor<f32> A,
+                                     Array2Accessor<u8> solid, f32 scale) {
+  index2 ij(blockIdx.x * blockDim.x + threadIdx.x,
+            blockIdx.y * blockDim.y + threadIdx.y);
+  if (A.stores(ij, ij)) {
+    if (solid[ij])
       return;
-    A(i, j).diag = 0;
-    A(i, j).x = 0;
-    A(i, j).y = 0;
+    A(ij, ij) = 0.f;
+    A(ij, ij.right()) = 0.f;
+    A(ij, ij.up()) = 0.f;
     // left - right
-    if (solid.isIndexStored(i - 1, j) && !solid(i - 1, j))
-      A(i, j).diag += scale;
-    if (solid.isIndexStored(i + 1, j)) {
-      if (!solid(i + 1, j)) {
-        A(i, j).diag += scale;
-        A(i, j).x = -scale;
+    if (solid.contains(ij.left())) {
+      if (!solid[ij.left()])
+        A(ij, ij) += scale;
+    } else // consider outside domain fluid
+      A(ij, ij) += scale;
+    if (solid.contains(ij.right())) {
+      if (!solid[ij.right()]) {
+        A(ij, ij) += scale;
+        A(ij, ij.right()) = -scale;
       } // else // EMPTY
       //   A(i, j).diag += scale;
     } else
-      A(i, j).diag += scale;
+      A(ij, ij) += scale;
     // bottom - top
-    if (solid.isIndexStored(i, j - 1) && !solid(i, j - 1))
-      A(i, j).diag += scale;
-    if (solid.isIndexStored(i, j + 1)) {
-      if (!solid(i, j + 1)) {
-        A(i, j).diag += scale;
-        A(i, j).y = -scale;
+    if (solid.contains(ij.down())) {
+      if (!solid[ij.down()])
+        A(ij, ij) += scale;
+    } else // consider outside domain fluid
+      A(ij, ij) += scale;
+    if (solid.contains(ij.up())) {
+      if (!solid[ij.up()]) {
+        A(ij, ij) += scale;
+        A(ij, ij.up()) = -scale;
       } // else // EMPTY
       //   A(i, j).diag += scale;
     } else
-      A(i, j).diag += scale;
+      A(ij, ij) += scale;
   }
 }
 
-__global__ void __buildRHS(MemoryBlock2Accessor<int> indices,
-                           RegularGrid2Accessor<float> divergence,
-                           CuMemoryBlock1Accessor<double> rhs) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  int j = blockIdx.y * blockDim.y + threadIdx.y;
-  if (indices.isIndexValid(i, j)) {
-    if (indices(i, j) >= 0)
-      rhs[indices(i, j)] = divergence(i, j);
+__global__ void __buildRHS(Array2Accessor<i32> indices,
+                           Grid2Accessor<f32> divergence,
+                           Array1Accessor<f32> rhs) {
+  index2 ij(blockIdx.x * blockDim.x + threadIdx.x,
+            blockIdx.y * blockDim.y + threadIdx.y);
+  if (indices.contains(ij) && indices[ij] >= 0) {
+    // TODO: fix for solid neighbors
+    rhs[indices[ij]] = divergence[ij];
   }
 }
 
-__global__ void __1To2(MemoryBlock2Accessor<int> indices,
-                       CuMemoryBlock1Accessor<double> v,
-                       MemoryBlock2Accessor<float> m) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  int j = blockIdx.y * blockDim.y + threadIdx.y;
-  if (indices.isIndexValid(i, j)) {
-    if (indices(i, j) >= 0)
-      m(i, j) = v[indices(i, j)];
-  }
+__global__ void __1To2(Array2Accessor<i32> indices, Array1Accessor<f32> v,
+                       Array2Accessor<f32> m) {
+  index2 ij(blockIdx.x * blockDim.x + threadIdx.x,
+            blockIdx.y * blockDim.y + threadIdx.y);
+  if (indices.contains(ij) && indices[ij] >= 0)
+    m[ij] = v[indices[ij]];
 }
 
-template <>
-size_t setupPressureSystem(RegularGrid2Df &divergence, RegularGrid2Duc &solid,
-                           FDMatrix2D &pressureMatrix, float dt,
-                           CuMemoryBlock1d &rhs) {
+size_t setupPressureSystem(Grid2<f32> &divergence, Array2<u8> &solid,
+                           FDMatrix2<f32> &pressure_matrix, f32 dt,
+                           Vector<f32> &rhs) {
   // fill matrix
-  float scale = dt / (divergence.spacing().x * divergence.spacing().x);
-  hermes::cuda::ThreadArrayDistributionInfo td(divergence.resolution());
+  f32 scale = dt / (divergence.spacing().x * divergence.spacing().x);
+  ThreadArrayDistributionInfo td(divergence.resolution());
   __fillPressureMatrix<<<td.gridSize, td.blockSize>>>(
-      pressureMatrix.dataAccessor(), solid.accessor(), scale);
+      pressure_matrix.accessor(), solid.accessor(), scale);
   // compute indices
-  auto res = divergence.resolution();
-  MemoryBlock2<MemoryLocation::HOST, int> h_indices(res);
-  h_indices.allocate();
-  MemoryBlock2<MemoryLocation::HOST, unsigned char> h_solid(res);
-  h_solid.allocate();
-  memcpy(h_solid, solid.data());
-  auto solidAcc = h_solid.accessor();
-  auto indicesAcc = h_indices.accessor();
+  ponos::Array2<i32> h_indices(divergence.resolution().ponos());
+  auto h_solid = solid.hostData();
   int curIndex = 0;
-  for (size_t j = 0; j < res.y; j++)
-    for (size_t i = 0; i < res.x; i++)
-      if (!solidAcc(i, j)) {
-        indicesAcc(i, j) = curIndex++;
-      } else
-        indicesAcc(i, j) = -1;
-  memcpy(pressureMatrix.indexData(), h_indices);
+  for (auto e : h_indices)
+    if (!h_solid[e.index]) {
+      e.value = curIndex++;
+    } else
+      e.value = -1;
+  pressure_matrix.indexData() = h_indices;
   // rhs
   rhs.resize(curIndex);
-  __buildRHS<<<td.gridSize, td.blockSize>>>(pressureMatrix.indexDataAccessor(),
-                                            divergence.accessor(),
-                                            rhs.accessor());
+  __buildRHS<<<td.gridSize, td.blockSize>>>(
+      pressure_matrix.indexData().accessor(), divergence.accessor(),
+      rhs.data().accessor());
   return curIndex;
 }
 
-template <>
-void solvePressureSystem(FDMatrix2D &A, RegularGrid2Df &divergence,
-                         RegularGrid2Df &pressure, RegularGrid2Duc &solid,
-                         float dt) {
+void solvePressureSystem(FDMatrix2<f32> &A, Grid2<f32> &divergence,
+                         Grid2<f32> &pressure, Array2<u8> &solid, f32 dt) {
+  pressure = 0;
   // setup system
-  CuMemoryBlock1d rhs;
-  setupPressureSystem(divergence, solid, A, dt, rhs);
+  Vector<f32> rhs;
+  PROFILE(setupPressureSystem(divergence, solid, A, dt, rhs));
   // apply incomplete Cholesky preconditioner
   // solve system
-  CuMemoryBlock1d x = std::vector<double>(rhs.size(), 0.f);
-  // FDMatrix3H H(A.gridSize());
-  // H.copy(A);
-  // auto acc = H.accessor();
-  // std::cerr << acc << "rhs\n" << rhs << std::endl;
-  std::cerr << "solve\n";
-  pcg(x, A, rhs, rhs.size(), 1e-12);
-  // std::cerr << residual << "\n" << x << std::endl;
-  // store pressure values
-  CuMemoryBlock1d sol = std::vector<double>(rhs.size(), 0);
-  mul(A, x, sol);
-  sub(sol, rhs, sol);
-  if (infnorm(sol, sol) > 1e-6)
-    std::cerr << "WRONG PCG!\n";
-  // std::cerr << sol << std::endl;
+  Vector<f32> x(rhs.size(), 0.f);
+  std::cerr << "solve " << rhs.size() << std::endl;
+  int it = 0;
+  PROFILE(it = pcg(x, A, rhs, rhs.size(), 1e-6));
+  std::cerr << it << " iterations\n";
+  auto residual = BLAS::infNorm(rhs - A * x);
+  std::cerr << residual << "\n";
   hermes::cuda::ThreadArrayDistributionInfo td(pressure.resolution());
-  __1To2<<<td.gridSize, td.blockSize>>>(A.indexDataAccessor(), x.accessor(),
+  __1To2<<<td.gridSize, td.blockSize>>>(A.indexData().accessor(),
+                                        x.data().accessor(),
                                         pressure.data().accessor());
 }
 
-__global__ void __projectionStepU(RegularGrid2Accessor<float> u, float scale) {
-  int x = blockIdx.x * blockDim.x + threadIdx.x;
-  int y = blockIdx.y * blockDim.y + threadIdx.y;
-  if (u.isIndexStored(x, y)) {
-    float xc = x + 0.5;
-    float yc = y + 0.5;
-    if (tex2D(solidTex2, xc - 1, yc))
-      u(x, y) = 0; // tex2D(uSolidTex2, xc - 1, yc);
-    else if (tex2D(solidTex2, xc, yc))
-      u(x, y) = 0; // tex2D(uSolidTex2, xc, yc);
+__global__ void __projectionStep(Grid2Accessor<f32> vel,
+                                 Grid2Accessor<f32> pressure,
+                                 Array2Accessor<u8> solid, index2 d,
+                                 float scale) {
+  index2 ij(blockIdx.x * blockDim.x + threadIdx.x,
+            blockIdx.y * blockDim.y + threadIdx.y);
+  if (vel.stores(ij)) {
+    if (solid[ij - d])
+      vel[ij] = 0; // TODO: must receive solid velocity
+    else if (solid[ij])
+      vel[ij] = 0;
     else {
-      float l = tex2D(pressureTex2, xc - 1, yc);
-      float r = tex2D(pressureTex2, xc, yc);
-      u(x, y) -= scale * (r - l);
+      f32 b = pressure[ij - d];
+      f32 f = pressure[ij];
+      vel[ij] -= scale * (f - b);
     }
   }
 }
 
-__global__ void __projectionStepV(RegularGrid2Accessor<float> v, float scale) {
-  int x = blockIdx.x * blockDim.x + threadIdx.x;
-  int y = blockIdx.y * blockDim.y + threadIdx.y;
-  if (v.isIndexStored(x, y)) {
-    float xc = x + 0.5;
-    float yc = y + 0.5;
-    if (tex2D(solidTex2, xc, yc - 1))
-      v(x, y) = 0; // tex2D(vSolidTex2, xc, yc - 1);
-    else if (tex2D(solidTex2, xc, yc))
-      v(x, y) = 0; // tex2D(vSolidTex2, xc, yc);
-    else {
-      float b = tex2D(pressureTex2, xc, yc - 1);
-      float t = tex2D(pressureTex2, xc, yc);
-      v(x, y) -= scale * (t - b);
-    }
+void projectionStep(Grid2<f32> &pressure, Array2<u8> &solid,
+                    VectorGrid2<f32> &velocity, f32 dt) {
+  {
+    float invdx = 1.0 / velocity.u().spacing().x;
+    float scale = dt * invdx;
+    ThreadArrayDistributionInfo td(velocity.u().resolution());
+    __projectionStep<<<td.gridSize, td.blockSize>>>(
+        velocity.u().accessor(), pressure.accessor(), solid.accessor(),
+        index2(1, 0), scale);
+  }
+  {
+    float invdx = 1.0 / velocity.v().spacing().y;
+    float scale = dt * invdx;
+    ThreadArrayDistributionInfo td(velocity.v().resolution());
+    __projectionStep<<<td.gridSize, td.blockSize>>>(
+        velocity.v().accessor(), pressure.accessor(), solid.accessor(),
+        index2(0, 1), scale);
   }
 }
-
-template <>
-void projectionStep_t(RegularGrid2Df &pressure, RegularGrid2Duc &solid,
-                      StaggeredGrid2D &velocity, float dt) {
-  pressureTex2.filterMode = cudaFilterModePoint;
-  pressureTex2.normalized = 0;
-  solidTex2.filterMode = cudaFilterModePoint;
-  solidTex2.normalized = 0;
-  Array2<f32> pArray(pressure.resolution());
-  Array2<u8r> sArray(solid.resolution());
-  cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>();
-  CHECK_CUDA(cudaBindTextureToArray(pressureTex2, pArray.data(), channelDesc));
-  channelDesc = cudaCreateChannelDesc<unsigned char>();
-  CHECK_CUDA(cudaBindTextureToArray(solidTex2, sArray.data(), channelDesc));
-  memcpy(pArray, pressure.data());
-  memcpy(sArray, solid.data());
-  {
-    auto info = velocity.u().info();
-    float invdx = 1.0 / info.spacing.x;
-    float scale = dt * invdx;
-    hermes::cuda::ThreadArrayDistributionInfo td(info.resolution);
-    __projectionStepU<<<td.gridSize, td.blockSize>>>(velocity.u().accessor(),
-                                                     scale);
-  }
-  {
-    auto info = velocity.v().info();
-    float invdx = 1.0 / info.spacing.y;
-    float scale = dt * invdx;
-    hermes::cuda::ThreadArrayDistributionInfo td(info.resolution);
-    __projectionStepV<<<td.gridSize, td.blockSize>>>(velocity.v().accessor(),
-                                                     scale);
-  }
-  cudaUnbindTexture(pressureTex2);
-  cudaUnbindTexture(solidTex2);
-}*/

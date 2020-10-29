@@ -26,11 +26,6 @@ set(SOURCES
 # 2d
 add_library(cuSmoke2d STATIC ${SOURCES} ${HEADERS})
 
-# add_executable(cuSmoke2d main2.cu
-# ${SOURCES} 
-# ${HEADERS}
-# ${COMMON_SOURCES}
-# )
 add_dependencies(cuSmoke2d ponos)
 
 target_compile_options(cuSmoke2d PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:

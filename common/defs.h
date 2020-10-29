@@ -26,6 +26,16 @@
 ///\brief
 
 #include <iostream>
+#include <ponos/common/timer.h>
+
+#define PROFILE(A)                                                             \
+  {                                                                            \
+    std::cerr << "[" << __FILE__ << "][" << __LINE__ << "] " << #A << " ... "; \
+    ponos::Timer timer;                                                        \
+    (A);                                                                       \
+    double ellapsedTime = timer.tack();                                        \
+    std::cerr << "done in " << ellapsedTime / 1000 << "s\n";                   \
+  }
 
 enum class MaterialType { FLUID = 0, AIR, SOLID };
 

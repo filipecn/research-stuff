@@ -54,9 +54,11 @@ void SemiLagrangianIntegrator2::advect(VectorGrid2<f32> &velocity,
                                        Grid2<f32> &phi, Grid2<f32> &phi_out,
                                        f32 dt) {
   hermes::cuda::ThreadArrayDistributionInfo td(phi.resolution());
-  __advect<<<td.gridSize, td.blockSize>>>(velocity.accessor(), solid.accessor(),
-                                          solid_phi.accessor(), phi.accessor(),
-                                          phi_out.accessor(), dt);
+  __advect<<<td.gridSize, td.blockSize>>>(
+      velocity.accessor(), solid.accessor(), solid_phi.accessor(),
+      phi.accessor(ponos::AddressMode::CLAMP_TO_EDGE, 0,
+                   ponos::InterpolationMode::LINEAR),
+      phi_out.accessor(), dt);
 }
 
 __global__ void __advect(VectorGrid2Accessor<f32> vel, Grid2Accessor<f32> in,

@@ -32,10 +32,6 @@ using namespace hermes::cuda;
 
 int pcg(Vector<f32> &x, FDMatrix2<f32> &A, Vector<f32> &b,
         size_t maxNumberOfIterations, float tolerance) {
-  // cpu memory
-  std::vector<double> h_r(b.size(), 0);
-  std::vector<double> h_z(b.size(), 0);
-  std::vector<double> precon(b.size(), 0);
   // FDMatrix2H h_A(A.gridSize());
   // h_A.copy(A);
   // mic0(precon, h_A, 0.97, 0.25);
@@ -44,7 +40,6 @@ int pcg(Vector<f32> &x, FDMatrix2<f32> &A, Vector<f32> &b,
   Vector<f32> r(b.size(), 0); // residual
   Vector<f32> z(b.size(), 0); // auxiliar
   Vector<f32> s(b.size(), 0); // search
-  std::cerr << "max " << maxNumberOfIterations << std::endl;
   // r = b - A * x
   r = b - A * x;
   if (BLAS::infNorm(r) <= tolerance)

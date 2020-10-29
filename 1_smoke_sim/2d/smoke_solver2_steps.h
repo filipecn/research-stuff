@@ -75,17 +75,17 @@ void computeDivergence(hermes::cuda::VectorGrid2<f32> &velocity,
                        hermes::cuda::Grid2<f32> &divergence);
 
 size_t setupPressureSystem(hermes::cuda::Grid2<f32> &divergence,
-                           hermes::cuda::Grid2<u8> &solid,
+                           hermes::cuda::Array2<u8> &solid,
                            hermes::cuda::FDMatrix2<f32> &A, f32 dt,
-                           hermes::cuda::Array1<f64> &rhs);
+                           hermes::cuda::Vector<f32> &rhs);
 
 void solvePressureSystem(hermes::cuda::FDMatrix2<f32> &pressureMatrix,
                          hermes::cuda::Grid2<f32> &divergence,
                          hermes::cuda::Grid2<f32> &pressure,
-                         hermes::cuda::Grid2<u8> &solid, f32 dt);
+                         hermes::cuda::Array2<u8> &solid, f32 dt);
 
 void projectionStep(hermes::cuda::Grid2<f32> &pressure,
-                    hermes::cuda::Grid2<u8> &solid,
+                    hermes::cuda::Array2<u8> &solid,
                     hermes::cuda::VectorGrid2<f32> &velocity, f32 dt);
 
 #endif

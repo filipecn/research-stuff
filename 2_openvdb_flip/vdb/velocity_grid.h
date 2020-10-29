@@ -29,6 +29,7 @@
 #define VDB_VELOCITY_GRID_H
 
 #include <openvdb/openvdb.h>
+#include <openvdb/points/PointAttribute.h>
 #include <ponos/common/defs.h>
 
 namespace vdb {
@@ -42,8 +43,34 @@ public:
   /// Set cell size
   /// \param spacing **[in]**
   void setSpacing(real_t spacing);
+  /// \brief
+  ///
+  /// \param max__coordinates **[in]**
+  void resize(const openvdb::math::Coord &max__coordinates);
+  /// \brief
+  ///
+  /// \param f **[in]**
+  void foreach (
+      const std::function<void(openvdb::math::Coord, openvdb::Vec3f &)> &f);
+  void foreach_s(const std::function<void(openvdb::math::Coord,
+                                          openvdb::Vec3f &)> &callback);
+  /// \brief
+  ///
+  /// \param points **[in]**
+  /// \param attribute_name **[in]**
+  void sample(openvdb::points::PointDataGrid::Ptr &points,
+              const std::string &attribute_name) const;
+  /// \brief
+  ///
+  /// \return openvdb::CoordBBox
+  openvdb::CoordBBox cbbox() const;
+  /// \brief
+  ///
+  /// \return openvdb::VectorGrid*
+  openvdb::VectorGrid *grid();
 
 private:
+  openvdb::CoordBBox grid_box_;
   /// A separate grid for each velocity component
   openvdb::VectorGrid::Ptr grid_;
 };

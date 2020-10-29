@@ -32,17 +32,23 @@
 using namespace hermes::cuda;
 
 __global__ void __setupScene(Collider2<f32> **solids, Collider2<f32> **scene,
-                             int res) {
+                             Info2 info) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
-    f32 d = 1.0 / res;
+    f32 d = info.spacing().x;
     // floor
-    solids[0] = new BoxCollider2<f32>(bbox2(point2(0.f), point2(1.f, d)));
+    solids[0] = new BoxCollider2<f32>(
+        bbox2(point2(0.f), point2(info.resolution.width, 3.f) * d));
     // ceil
-    solids[1] = new BoxCollider2<f32>(bbox2(point2(0.f, 1.f - d), point2(1.f)));
+    solids[1] = new BoxCollider2<f32>(
+        bbox2(point2(0.f, info.resolution.height - 3) * d,
+              point2(info.resolution.width, info.resolution.height) * d));
     // left
-    solids[2] = new BoxCollider2<f32>(bbox2(point2(0.f), point2(d, 1.f)));
+    solids[2] = new BoxCollider2<f32>(
+        bbox2(point2(0.f), point2(3, info.resolution.height) * d));
     // right
-    solids[3] = new BoxCollider2<f32>(bbox2(point2(1.f - d, 0.f), point2(1.f)));
+    solids[3] = new BoxCollider2<f32>(
+        bbox2(point2(info.resolution.width - 3, 0.f) * d,
+              point2(info.resolution.width, info.resolution.height) * d));
     *scene = new Collider2Set<f32>(solids, 4);
   }
 }
@@ -83,9 +89,12 @@ __global__ void __normalizeIFFT(f32 *g_data, int width, int height, f32 N) {
 }
 
 SmokeSolver2::SmokeSolver2() {
-  uIntegrator_.reset(new MacCormackIntegrator2());
-  vIntegrator_.reset(new MacCormackIntegrator2());
-  integrator_.reset(new MacCormackIntegrator2());
+  // u_integrator_.reset(new MacCormackIntegrator2());
+  // v_integrator_.reset(new MacCormackIntegrator2());
+  // integrator_.reset(new MacCormackIntegrator2());
+  u_integrator_.reset(new SemiLagrangianIntegrator2());
+  v_integrator_.reset(new SemiLagrangianIntegrator2());
+  integrator_.reset(new SemiLagrangianIntegrator2());
   for (int i = 0; i < 2; ++i)
     velocity_[i].setGridType(ponos::VectorGridType::STAGGERED);
   solid_velocity_.setGridType(ponos::VectorGridType::STAGGERED);
@@ -100,11 +109,11 @@ SmokeSolver2::~SmokeSolver2() {
 }
 
 void SmokeSolver2::setUIntegrator(Integrator2 *integrator) {
-  uIntegrator_.reset(integrator);
+  u_integrator_.reset(integrator);
 }
 
 void SmokeSolver2::setVIntegrator(Integrator2 *integrator) {
-  vIntegrator_.reset(integrator);
+  v_integrator_.reset(integrator);
 }
 
 void SmokeSolver2::setIntegrator(Integrator2 *integrator) {
@@ -144,8 +153,8 @@ void SmokeSolver2::setResolution(const ponos::size2 &res) {
   solid_velocity_.setResolution(info_.resolution);
   force_field_.setResolution(info_.resolution);
   integrator_->set(scalar_fields_[0][0].info());
-  uIntegrator_->set(velocity_[0].u().info());
-  vIntegrator_->set(velocity_[0].v().info());
+  u_integrator_->set(velocity_[0].u().info());
+  v_integrator_->set(velocity_[0].v().info());
   pressure_matrix_.resize(info_.resolution);
   scene_.resize(info_.resolution);
 }
@@ -165,8 +174,8 @@ void SmokeSolver2::setSpacing(const ponos::vec2f &s) {
   solid_velocity_.setSpacing(info_.spacing());
   force_field_.setSpacing(info_.spacing());
   integrator_->set(scalar_fields_[0][0].info());
-  uIntegrator_->set(velocity_[0].u().info());
-  vIntegrator_->set(velocity_[0].v().info());
+  u_integrator_->set(velocity_[0].u().info());
+  v_integrator_->set(velocity_[0].v().info());
 }
 
 void SmokeSolver2::setOrigin(const ponos::point2f &o) {
@@ -184,8 +193,8 @@ void SmokeSolver2::setOrigin(const ponos::point2f &o) {
   solid_velocity_.setOrigin(p);
   force_field_.setOrigin(p);
   integrator_->set(scalar_fields_[0][0].info());
-  uIntegrator_->set(velocity_[0].u().info());
-  vIntegrator_->set(velocity_[0].v().info());
+  u_integrator_->set(velocity_[0].u().info());
+  v_integrator_->set(velocity_[0].v().info());
 }
 
 size_t SmokeSolver2::addScalarField() {
@@ -198,7 +207,10 @@ size_t SmokeSolver2::addScalarField() {
 }
 
 void SmokeSolver2::step(f32 dt) {
-  velocity_[dst] = velocity_[src];
+  u_integrator_->advect(velocity_[src], solid_, solid_velocity_.u(),
+                        velocity_[src].u(), velocity_[dst].u(), dt);
+  v_integrator_->advect(velocity_[src], solid_, solid_velocity_.v(),
+                        velocity_[src].v(), velocity_[dst].v(), dt);
   for (size_t i = 0; i < scalar_fields_[src].size(); i++)
     integrator_->advect(velocity_[dst], solid_, solid_scalar_fields_[i],
                         scalar_fields_[src][i], scalar_fields_[dst][i], dt);
@@ -210,16 +222,33 @@ void SmokeSolver2::step(f32 dt) {
                    scalar_fields_[src][1], 273, 1.0f, 0.0f);
   // addVorticityConfinementForce(force_field_, velocity_[src],
   // solid_,vorticity_field_, 2.f, dt);
-  // applyForceField(velocity_[src], solid_, force_field_, dt);
+  applyForceField(velocity_[src], solid_, force_field_, dt);
   // injectSmoke(scalar_fields_[src][0], scene_.smoke_source, dt);
-
-  // computeDivergence(velocity_[src], solid_, solid_velocity_, divergence_);
-  // solvePressureSystem(pressure_matrix_, divergence_, pressure_, solid_, dt);
-  // projectionStep_t(pressure_, solid_, velocity_[src], dt);
+  computeDivergence(velocity_[src], solid_, solid_velocity_, divergence_);
+  std::cerr << "MAX VEL BEFORE "
+            << reduce<f32, f32, ReducePredicates::max_abs<f32>>(
+                   velocity_[src].u().data(), ReducePredicates::max_abs<f32>())
+            << " "
+            << reduce<f32, f32, ReducePredicates::max_abs<f32>>(
+                   velocity_[src].v().data(), ReducePredicates::max_abs<f32>())
+            << std::endl;
+  solvePressureSystem(pressure_matrix_, divergence_, pressure_, solid_, dt);
+  std::cerr << "MAX PRESS "
+            << reduce<f32, f32, ReducePredicates::max_abs<f32>>(
+                   pressure_.data(), ReducePredicates::max_abs<f32>())
+            << std::endl;
+  projectionStep(pressure_, solid_, velocity_[src], dt);
+  std::cerr << "MAX VEL AFTER "
+            << reduce<f32, f32, ReducePredicates::max_abs<f32>>(
+                   velocity_[src].u().data(), ReducePredicates::max_abs<f32>())
+            << " "
+            << reduce<f32, f32, ReducePredicates::max_abs<f32>>(
+                   velocity_[src].v().data(), ReducePredicates::max_abs<f32>())
+            << std::endl;
 }
 
 void SmokeSolver2::rasterColliders() {
-  __setupScene<<<1, 1>>>(scene_.list, scene_.colliders, info_.resolution.width);
+  __setupScene<<<1, 1>>>(scene_.list, scene_.colliders, info_);
   CHECK_CUDA(cudaDeviceSynchronize());
   ThreadArrayDistributionInfo td(info_.resolution);
   __rasterColliders<<<td.gridSize, td.blockSize>>>(

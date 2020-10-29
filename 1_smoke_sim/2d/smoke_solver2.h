@@ -64,8 +64,8 @@ public:
 
 private:
   Scene2<float> scene_;
-  std::shared_ptr<Integrator2> vIntegrator_;
-  std::shared_ptr<Integrator2> uIntegrator_;
+  std::shared_ptr<Integrator2> v_integrator_;
+  std::shared_ptr<Integrator2> u_integrator_;
   std::shared_ptr<Integrator2> integrator_;
   hermes::cuda::FDMatrix2<f32> pressure_matrix_;
   hermes::cuda::VectorGrid2<f32> velocity_[2];

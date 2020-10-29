@@ -2,6 +2,7 @@
 
 #include <openvdb/openvdb.h>
 #include <openvdb/points/PointAttribute.h>
+#include <openvdb/points/PointScatter.h>
 #include <openvdb/tools/LevelSetSphere.h>
 #include <vdb/openvdb_utils.h>
 
@@ -120,6 +121,39 @@ TEST_CASE("OpenVDB Sanity checks", "[openvdb]") {
       }
     }
     // vdb::printLeafPoints(leaf);
+  }
+  SECTION("check staggered grid") {
+    Vec3s velocity_background(1.0, 2.0, 3.0);
+    VectorGrid::Ptr grid = VectorGrid::create(velocity_background);
+    grid->setGridClass(GRID_STAGGERED);
+    auto acc = grid->getAccessor();
+    for (int i = 0; i < 10; ++i)
+      for (int j = 0; j < 10; ++j)
+        for (int k = 0; k < 10; ++k)
+          acc.setValue(Coord(i, j, k), Vec3f(i, j, k));
+    for (int i = 1; i < 9; ++i)
+      for (int j = 1; j < 9; ++j)
+        for (int k = 1; k < 9; ++k) {
+          Vec3f expected(i + 0.5, j + 0.5, k + 0.5);
+          auto sample = tools::StaggeredBoxSampler::sample(acc, Vec3f(i, j, k));
+          REQUIRE(math::isApproxEqual(expected, sample));
+        }
+  }
+  SECTION("Point scatter") {
+    // create a simple grid
+    FloatGrid grid;
+    grid.fill(math::CoordBBox(math::Coord(0, 0, 0), math::Coord(10, 10, 10)),
+              1.f, true);
+    grid.setTransform(math::Transform::createLinearTransform(0.2));
+    // scatter points
+    auto points = points::uniformPointScatter(grid, 1000);
+    REQUIRE(points::pointCount(points->tree()) == 1000);
+    for (auto leaf = points->tree().beginLeaf(); leaf; ++leaf) {
+      points::AttributeArray &array = leaf->attributeArray("P");
+      points::AttributeHandle<Vec3f> handle(array);
+      // for (auto index = leaf->beginIndexOn(); index; ++index)
+      // std::cerr << handle.get(*index) << " ";
+    }
   }
 }
 
